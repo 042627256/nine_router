@@ -14,7 +14,7 @@ function locate(start, maxDepth) {
     } catch {
       continue;
     }
-    // 0.5.86: module 4493 lives in 5330.js
+    // 0.5.91: module 4493 lives in 5330.js (same chunk name as 0.5.86)
     if (fs.existsSync(path.join(dir, "server", "chunks", "5330.js"))) return dir;
     for (const ent of entries) {
       if (ent.isDirectory() && !SKIP.has(ent.name)) {
@@ -31,12 +31,14 @@ const CLAUDE_MODELS = [
 ];
 
 const CAP_ANCHOR = `"muse-spark-1.2-contributor-free":{vision:!0,reasoning:!0,thinkingFormat:"openai",contextWindow:1048576,maxOutput:131072}`;
-// 0.5.86: union-alpha already exists in capability map but missing reasoning+thinkingFormat
+// union-alpha already exists in capability map but missing reasoning+thinkingFormat
 const CAP_EXTRA = `,"union-alpha-free":{vision:!0,reasoning:!0,thinkingFormat:"anthropic",contextWindow:262144,maxOutput:131072}`;
 
 const PATCHES = [
   // PATCH 1: Inject union-alpha-free into the free-tier Set and add _Q4 tool definitions
   // in module 4493 (5330.js). Also add union-alpha-free to the routing Set.
+  // 0.5.91 note: transformRequest now chains `,H(a||b?.model)` after `(b.stream=!0)`;
+  // the anchor still matches as a prefix and _injectQ4(b) slots in via comma operator.
   {
     files: [["server", "chunks", "5330.js"]],
     fn(c) {
@@ -59,7 +61,8 @@ const PATCHES = [
       if (!out.includes("let _Q4=[")) out = out.replace(toolsDecl, toolsInsert);
 
       // Inject model mapping and tool injection at start of transformRequest
-      // Original starts with: transformRequest(a,b,c,d){if(b&&"object"==typeof b&&a&&!b.model&&(b.model=a),b&&"object"==typeof b&&(b.stream=!0)
+      // 0.5.86: transformRequest(a,b,c,d){if(b&&"object"==typeof b&&a&&!b.model&&(b.model=a),b&&"object"==typeof b&&(b.stream=!0)
+      // 0.5.91: same prefix, followed by `,H(a||b?.model)&&b&&"object"==typeof b){...`
       const trAnchor = 'transformRequest(a,b,c,d){if(b&&"object"==typeof b&&a&&!b.model&&(b.model=a),b&&"object"==typeof b&&(b.stream=!0)';
       const trReplacement = 'transformRequest(a,b,c,d){if(b&&"object"==typeof b&&a&&(b.model==="union-alpha-free"&&(b.model="union-alpha"),!b.model&&(b.model=a)),b&&"object"==typeof b&&(b.stream=!0),_injectQ4(b)';
       out = out.replace(trAnchor, trReplacement);
@@ -68,12 +71,13 @@ const PATCHES = [
     }
   },
   // PATCH 2: Add union-alpha-free to opencode provider model list
-  // union-alpha already exists in 0.5.86; just inject union-alpha-free after it
+  // 0.5.86 chunks: 235.js, 4895.js, 8325.js
+  // 0.5.91 chunks: 5315.js, 7011.js, 9866.js
   {
     files: [
-      ["server", "chunks", "235.js"],
-      ["server", "chunks", "4895.js"],
-      ["server", "chunks", "8325.js"]
+      ["server", "chunks", "5315.js"],
+      ["server", "chunks", "7011.js"],
+      ["server", "chunks", "9866.js"]
     ],
     fn(c) {
       // Add union-alpha-free after union-alpha in supportedFormats arrays
@@ -83,7 +87,7 @@ const PATCHES = [
       if (out.includes(uaEntry) && !out.includes('union-alpha-free')) {
         out = out.replace(uaEntry, uaEntry + ',' + uaFreeEntry);
       }
-      // Also handle models:[...] format with targetFormat
+      // Also handle models:[...] format with targetFormat (present in 0.5.86, absent in 0.5.91)
       const uaModel = '{"id":"union-alpha","name":"Union Alpha Free","targetFormat":"claude"}';
       const uaFreeModel = '{"id":"union-alpha-free","name":"Union Alpha Free","targetFormat":"claude"}';
       if (out.includes(uaModel) && !out.includes('union-alpha-free')) {
@@ -92,7 +96,7 @@ const PATCHES = [
       return out === c ? null : out;
     }
   },
-  // PATCH 3: Add union-alpha-free to capability map
+  // PATCH 3: Add union-alpha-free to capability map (chunks unchanged in 0.5.91)
   // union-alpha already exists but missing reasoning+thinkingFormat; union-alpha-free is new
   {
     files: [
